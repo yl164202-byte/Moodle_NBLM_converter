@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moodle 討論區與作業文字轉換器</title>
+    <!-- 引入輕量級前端解析庫：PapaParse (CSV) 與 JSZip (ZIP) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --secondary: #64748b;
+            --secondary-hover: #475569;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --border: #cbd5e1;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft JhengHei", sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            max-width: 820px;
+            margin: 40px auto;
+            padding: 0 20px;
+            line-height: 1.6;
+        }
+        .container {
+            background: var(--card);
+            padding: 32px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: #0f172a;
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            font-weight: 600;
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+        .hint-text {
+            font-weight: normal;
+            color: #64748b;
+            font-size: 0.8rem;
+        }
+        input[type="text"] {
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+        input[type="text"].input-error {
+            border-color: #dc2626;
+            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
+        }
+        .drop-zone {
+            border: 2px dashed #94a3b8;
+            border-radius: 10px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background-color: #f1f5f9;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--primary);
+            background-color: #eff6ff;
+        }
+        .drop-zone p {
+            margin: 0;
+            font-size: 1.05rem;
+            color: #475569;
+        }
+        .drop-zone .sub-text {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin-top: 8px;
+        }
+        .preview-section {
+            margin-top: 24px;
+            display: none;
+        }
+        .preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        textarea {
+            width: 100%;
+            height: 260px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-family: Consolas, Monaco, "Microsoft JhengHei", monospace;
+            font-size: 0.9rem;
+            resize: vertical;
+            box-sizing: border-box;
+            background-color: #f8fafc;
+        }
+        .btn {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn:hover {
+            background-color: var(--primary-hover);
+        }
+        .btn-clear {
+            background-color: var(--secondary);
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+        .btn-clear:hover {
+            background-color: var(--secondary-hover);
+        }
+        .status-msg {
+            margin-top: 12px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #059669;
+        }
+        .error-msg {
+            color: #dc2626;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header-row">
+        <h1>Moodle 討論區與作業文字轉換器</h1>
+        <button type="button" class="btn btn-clear" id="clearBtn">清空全部</button>
+    </div>
+    
+    <div class="form-grid">
+        <div class="form-group">
+            <label for="courseName">班級課程名稱 <span class="hint-text">（CSV必填 / ZIP自動抓取）</span></label>
+            <input type="text" id="courseName" placeholder="例如：114上_華語文教學導論">
+        </div>
+        <div class="form-group">
+            <label for="topicName">討論區 / 作業主題 <span class="hint-text">（CSV必填 / ZIP自動抓取）</span></label>
+            <input type="text" id="topicName" placeholder="例如：第一週課堂反思">
+        </div>
+    </div>
+
+    <div class="drop-zone" id="dropZone">
+        <p><strong>點擊選擇檔案</strong>，或將 Moodle 下載的檔案拖曳至此處</p>
+        <p class="sub-text">支援討論區匯出檔 (<code>.csv</code>) 或作業批次下載壓縮檔 (<code>.zip</code>)</p>
+        <input type="file" id="fileInput" accept=".csv,.zip" style="display: none;">
+    </div>
+
+    <div id="status" class="status-msg"></div>
+
+    <div class="preview-section" id="previewSection">
+        <div class="preview-header">
+            <label>轉換結果預覽（可直接編輯或重新下載）：</label>
+            <button type="button" class="btn" id="downloadBtn">下載 TXT 檔案</button>
+        </div>
+        <textarea id="outputPreview"></textarea>
+    </div>
+</div>
+
+<script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const courseInput = document.getElementById('courseName');
+    const topicInput = document.getElementById('topicName');
+    const statusDiv = document.getElementById('status');
+    const previewSection = document.getElementById('previewSection');
+    const outputPreview = document.getElementById('outputPreview');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    // 輸入時自動移除紅框警告
+    [courseInput, topicInput].forEach(input => {
+        input.addEventListener('input', () => input.classList.remove('input-error'));
+    });
+
+    // 清空按鈕功能
+    clearBtn.addEventListener('click', () => {
+        courseInput.value = '';
+        topicInput.value = '';
+        courseInput.classList.remove('input-error');
+        topicInput.classList.remove('input-error');
+        fileInput.value = ''; // 重置 file input，允許重複上傳同一檔案
+        outputPreview.value = '';
+        previewSection.style.display = 'none';
+        statusDiv.className = 'status-msg';
+        statusDiv.textContent = '';
+    });
+
+    // 點擊與拖曳事件綁定
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) {
+            handleFile(e.dataTransfer.files[0]);
+        }
+    });
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleFile(e.target.files[0]);
+        }
+        // 每次選完檔案後清空 value，確保下次選同一個檔案時 change 事件仍會觸發
+        fileInput.value = '';
+    });
+
+    // 將 HTML 標籤轉換為乾淨的純文字，保留基本換行
+    function stripHtml(htmlString) {
+        if (!htmlString) return "";
+        let formatted = htmlString
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/p>/gi, '\n')
+            .replace(/<\/div>/gi, '\n')
+            .replace(/<\/li>/gi, '\n');
+        
+        const doc = new DOMParser().parseFromString(formatted, 'text/html');
+        let text = doc.body.textContent || "";
+        return text.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+    // 過濾檔名中的非法字元
+    function sanitizeFilename(name) {
+        return name.replace(/[\\/:*?"<>|]/g, '_').trim();
+    }
+
+    // 觸發瀏覽器下載 TXT（加入 UTF-8 BOM 確保 Windows 記事本開啟不亂碼）
+    function triggerDownload(content, filename) {
+        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+        const blob = new Blob([bom, content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // 主檔案分流處理
+    function handleFile(file) {
+        statusDiv.className = 'status-msg';
+        courseInput.classList.remove('input-error');
+        topicInput.classList.remove('input-error');
+        
+        const fileNameLower = file.name.toLowerCase();
+
+        if (fileNameLower.endsWith('.csv')) {
+            // CSV 強制檢查兩欄是否皆已填寫
+            const courseVal = courseInput.value.trim();
+            const topicVal = topicInput.value.trim();
+            
+            if (!courseVal || !topicVal) {
+                statusDiv.className = 'status-msg error-msg';
+                statusDiv.textContent = '⚠️ CSV 檔案無法自動抓取名稱，請先填寫「班級課程名稱」與「討論區 / 作業主題」後再匯入！';
+                if (!courseVal) {
+                    courseInput.classList.add('input-error');
+                    courseInput.focus();
+                } else {
+                    topicInput.classList.add('input-error');
+                    topicInput.focus();
+                }
+                return;
+            }
+            statusDiv.textContent = `正在處理：${file.name}...`;
+            processCSV(file);
+        } else if (fileNameLower.endsWith('.zip')) {
+            statusDiv.textContent = `正在處理：${file.name}...`;
+            processZIP(file);
+        } else {
+            statusDiv.className = 'status-msg error-msg';
+            statusDiv.textContent = '錯誤：請上傳 .csv 或 .zip 檔案。';
+        }
+    }
+
+    // 處理討論區 CSV（完全使用使用者輸入的課程與主題）
+    function processCSV(file) {
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: function(results) {
+                const rows = results.data;
+                if (!rows || rows.length === 0) {
+                    statusDiv.className = 'status-msg error-msg';
+                    statusDiv.textContent = 'CSV 檔案內容為空。';
+                    return;
+                }
+
+                const headers = Object.keys(rows[0]);
+                const subjectKey = headers.find(h => /subject|主旨|標題|討論串/i.test(h)) || headers[0];
+                const authorKey = headers.find(h => /user|author|fullname|作者|姓名|張貼者/i.test(h));
+                const timeKey = headers.find(h => /created|time|date|時間|日期/i.test(h));
+                const messageKey = headers.find(h => /message|content|內容|訊息|內文/i.test(h)) || headers[headers.length - 1];
+
+                let outputLines = [];
+                rows.forEach((row, index) => {
+                    const subject = row[subjectKey] || '';
+                    const author = authorKey ? (row[authorKey] || '未知作者') : `發言者 ${index + 1}`;
+                    const time = timeKey ? (row[timeKey] || '') : '';
+                    const cleanContent = stripHtml(row[messageKey]);
+
+                    outputLines.push(`========================================`);
+                    outputLines.push(`【${index + 1}】主旨：${subject}`);
+                    outputLines.push(`作者：${author} ${time ? `| 時間：${time}` : ''}`);
+                    outputLines.push(`----------------------------------------`);
+                    outputLines.push(cleanContent);
+                    outputLines.push(``);
+                });
+
+                finalizeOutput(outputLines.join('\n'));
+            },
+            error: function(err) {
+                statusDiv.className = 'status-msg error-msg';
+                statusDiv.textContent = `CSV 解析失敗：${err.message}`;
+            }
+        });
+    }
+
+    // 處理作業區 ZIP（自動從檔名分離「班級課程名稱」與「作業主題」）
+    async function processZIP(file) {
+        try {
+            // 去除副檔名與結尾的數字編號（例如：課程名稱-作業主題-123456.zip -> 課程名稱-作業主題）
+            let baseName = file.name.replace(/\.zip$/i, '').replace(/-\d+$/, '');
+            
+            // 以 "-" 切割（Moodle 預設格式為：班級課程名稱-作業主題）
+            const parts = baseName.split('-');
+            let inferredCourse = '';
+            let inferredTopic = baseName;
+
+            if (parts.length >= 2) {
+                inferredCourse = parts[0].trim();
+                // 若主題本身也包含 "-"，將第一段之後的所有片段重新組合為主題
+                inferredTopic = parts.slice(1).join('-').trim();
+            }
+
+            // 僅在輸入框留空時自動填入，保留使用者手動預填的內容
+            if (!courseInput.value.trim() && inferredCourse) {
+                courseInput.value = inferredCourse;
+            }
+            if (!topicInput.value.trim() && inferredTopic) {
+                topicInput.value = inferredTopic;
+            }
+
+            const zip = await JSZip.loadAsync(file);
+            let htmlEntries = [];
+
+            zip.forEach((relativePath, zipEntry) => {
+                if (!zipEntry.dir && relativePath.toLowerCase().endsWith('.html')) {
+                    htmlEntries.push({ path: relativePath, entry: zipEntry });
+                }
+            });
+
+            if (htmlEntries.length === 0) {
+                statusDiv.className = 'status-msg error-msg';
+                statusDiv.textContent = 'ZIP 檔案中找不到任何 .html 檔案。';
+                return;
+            }
+
+            htmlEntries.sort((a, b) => a.path.localeCompare(b.path, 'zh-Hant'));
+
+            let outputLines = [];
+            for (let i = 0; i < htmlEntries.length; i++) {
+                const item = htmlEntries[i];
+                const rawHtml = await item.entry.async('string');
+                const cleanText = stripHtml(rawHtml);
+
+                const pathParts = item.path.split('/');
+                let studentInfo = item.path;
+                if (pathParts.length > 1) {
+                    const folderName = pathParts[pathParts.length - 2];
+                    studentInfo = folderName.split('_')[0] || folderName;
+                }
+
+                outputLines.push(`========================================`);
+                outputLines.push(`【${i + 1}】學生 / 來源：${studentInfo}`);
+                outputLines.push(`原始路徑：${item.path}`);
+                outputLines.push(`----------------------------------------`);
+                outputLines.push(cleanText);
+                outputLines.push(``);
+            }
+
+            finalizeOutput(outputLines.join('\n'));
+        } catch (err) {
+            statusDiv.className = 'status-msg error-msg';
+            statusDiv.textContent = `ZIP 解壓縮失敗：${err.message}`;
+        }
+    }
+
+    // 組合最終檔名、顯示預覽並自動觸發下載
+    function finalizeOutput(textContent) {
+        const course = courseInput.value.trim();
+        const topic = topicInput.value.trim() || 'Moodle匯出文字';
+        
+        let finalFilename = course ? `${course}_${topic}.txt` : `${topic}.txt`;
+        finalFilename = sanitizeFilename(finalFilename);
+
+        outputPreview.value = textContent;
+        previewSection.style.display = 'block';
+        statusDiv.textContent = `轉換完成！已自動下載：${finalFilename}`;
+
+        triggerDownload(textContent, finalFilename);
+    }
+
+    // 手動重新下載按鈕
+    downloadBtn.addEventListener('click', () => {
+        const course = courseInput.value.trim();
+        const topic = topicInput.value.trim() || 'Moodle匯出文字';
+        const finalFilename = sanitizeFilename(course ? `${course}_${topic}.txt` : `${topic}.txt`);
+        triggerDownload(outputPreview.value, finalFilename);
+        statusDiv.textContent = `已重新下載：${finalFilename}`;
+    });
+</script>
+
+</body>
+</html>
